@@ -125,3 +125,64 @@ Résumé des choix et de leur raison :
   du backoffice. Un test devra tenter un INSERT et exiger son échec.
 - **`/version` + tampon affiché en bas de chaque écran**, SHA lu par
   `git rev-parse` au démarrage, suffixe `+sale` si larbre
+
+⛔ **L'ENTRÉE CI-DESSUS EST TRONQUÉE. Elle s'arrête au milieu d'une phrase.**
+
+Je l'ai écrite avec un `printf` dans un shell : les accents graves de
+`` `asc.py` `` ont été interprétés comme substitution de commande (`bash: asc.py:
+command not found`) et l'apostrophe de « l'arbre » a fermé la chaîne. Le reste de
+l'entrée n'a jamais atteint le fichier — et le commit `bcc5ba5` a **quand même
+réussi**, puisque `git commit` ne relit pas ce qu'il enregistre.
+
+Je ne l'efface pas (R1). Elle reste comme trace : **un outil qui rend la main en
+succès n'a pas prouvé qu'il a écrit ce que je croyais.** C'est le même piège que
+`--si-libre` sortant en succès quand il sautait, et que les 293 tests verts sur
+trois effets cassés. Le journal a servi à quelque chose exactement une fois : ici.
+
+Correctif de méthode, appliqué à partir de maintenant : **le journal s'écrit avec
+l'outil d'écriture de fichier, jamais par `printf`/heredoc dans un shell**, et je
+relis la fin du fichier après écriture.
+
+Entrée complète, réécrite ci-dessous.
+
+---
+
+## 2026-09-10 14:20 — Étape 2, architecture proposée (entrée complète)
+
+`ARCHITECTURE.md` publié. **Rien de construit.** En attente de validation.
+
+Résumé des choix et de leur raison :
+
+- **Node 22 + `pg`, une seule dépendance, aucune étape de build.** Node est déjà
+  là, le serveur de jeu est en Node (un seul langage pour les deux moitiés),
+  `node --test` est livré avec. Pas de framework front : la valeur est dans le
+  SQL, pas dans une interface.
+- **Lecture seule : quatre gardes superposées** — G1 rôle `SELECT` seul, G2
+  `default_transaction_read_only`, G3 session en lecture seule, G4 point de
+  passage unique refusant tout texte SQL ne commençant pas par SELECT/WITH. Dit
+  explicitement dans le document : **seule G1 compte vraiment**, et elle vit hors
+  du backoffice. Un test devra tenter un INSERT et exiger son échec.
+- **`/version` + tampon affiché en bas de chaque écran**, SHA lu par
+  `git rev-parse` au démarrage, suffixe `+sale` si l'arbre est sale. Une version
+  qui ne correspond à aucun commit doit se dénoncer elle-même.
+- **Boutiques : `asc.py` et `play_api.py` appelés en sous-processus**, jamais
+  réécrits, et seules leurs options de lecture sont en liste blanche. L'état
+  `non-lu` est un état affiché avec sa raison exacte — aucun chemin de code ne
+  produit de valeur par défaut.
+- **`actions/` n'existe pas** : le dossier n'est pas créé, le serveur HTTP ne
+  monte que des GET et rend 405 sur POST. Aucun point d'extension construit à
+  l'avance — une couche bâtie pour un besoin futur est une couche à maintenir
+  aujourd'hui pour un besoin qui n'existe pas encore.
+- **`listen(8787, '127.0.0.1')` en dur**, pas configurable. Une variable
+  d'environnement qui peut valoir `0.0.0.0` est une exposition qui attend une
+  faute de frappe.
+
+**OUVERT** — l'écran ③ ne peut pas être conçu avant B1 (`\d match`). Je connais
+l'existence de la colonne de raison (`reason: reason || 'normal'` dans
+`match.js`), pas son nom ni les autres colonnes.
+
+**Noté pour la mesure à venir** : `disconnect` n'est pas forcément un défaut — un
+mobile qui passe sous un tunnel en produit un. La seule forme qui distingue un
+défaut mis en production d'un comportement normal d'application mobile, c'est
+**une rupture dans le temps**. C'est ce que l'écran ③ doit montrer en premier ;
+les autres découpages servent à localiser la cause une fois la rupture vue.

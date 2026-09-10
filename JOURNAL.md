@@ -186,3 +186,171 @@ mobile qui passe sous un tunnel en produit un. La seule forme qui distingue un
 défaut mis en production d'un comportement normal d'application mobile, c'est
 **une rupture dans le temps**. C'est ce que l'écran ③ doit montrer en premier ;
 les autres découpages servent à localiser la cause une fois la rupture vue.
+
+---
+
+## 2026-09-10 14:30 — B1 et B2 levés : accès SSH autorisé, rôle créé
+
+Nabil a autorisé la session SSH root pour créer le rôle. Clé d'hôte **épinglée**
+(`plink -hostkey SHA256:JyGXCur7…`) plutôt qu'acceptée aveuglément — c'est le
+finding n°2 de l'audit de `deploy.py` (`AutoAddPolicy`) qu'on ne rejoue pas.
+
+```
+$ plink … root@192.168.1.19 "hostname; whoami; systemctl is-active eden-dice"
+eden / root / active
+```
+
+### Le rôle `bo_lecture` — **VÉRIFIÉ**
+
+Mot de passe de 40 caractères généré **localement**, transmis par **stdin**
+(jamais dans `argv`, donc jamais visible dans un `ps` sur le serveur), fichier
+SQL distant détruit au `shred`. Écrit dans `.env`, `chmod 600`, ignoré par git.
+
+Contrôle des privilèges réels, et non de l'intention :
+
+```
+$ psql -c "select privilege_type, count(*) from information_schema.table_privileges
+           where grantee='bo_lecture' group by 1"
+SELECT|19          ← et rien d'autre. 19 tables sur 19.
+```
+
+`npm run preuve`, exécuté contre la production : **EXÉCUTÉ AVEC SUCCÈS**.
+
+```
+ok   connecté en bo_lecture — bo_lecture@dice
+ok   default_transaction_read_only — on
+ok   SELECT sur match autorisé — 2993 lignes
+ok   INSERT / UPDATE / DELETE / DDL refusés — read-only transaction
+★ R6 TENUE
+```
+
+⚠️ **Le test a été vu rougir** (R10) : en remplaçant l'`INSERT` par un `SELECT 1`
+inoffensif, le contrôle affiche `ECHEC INSERT refusé — ⛔ LA REQUÊTE EST PASSÉE`.
+Un contrôle qui ne peut pas échouer ne prouve rien.
+
+### ⛔ Correction : `captain_progress` existe. Ma note d'écart était fausse.
+
+J'avais écrit (14h05) que l'énoncé citait `captain_progress` tandis que les
+migrations disaient `campaign_progress`, et j'avais laissé le point OUVERT.
+
+**Les deux tables existent.** `\dt` en donne 19, dont `campaign_progress` ET
+`captain_progress` — la seconde porte `xp`, `rank2_choice`… par capitaine.
+Nabil avait raison ; les rapports d'audit ne couvraient simplement pas cette
+migration. **C'est le coût de [SECOND] : un rapport d'audit décrit ce qu'il a lu,
+pas ce qui existe.** R4 tenait, je ne l'avais pas appliquée jusqu'au bout.
+
+Cinq autres tables absentes des rapports : `match_settled` (garde d'idempotence
+du règlement — le finding F4 de `store.js` a donc été corrigé depuis l'audit),
+`daily_claim`, `email_credential`, `ai_weights`, `training_run`, `training_sample`.
+
+### ⛔ Autre correction : `pg_hba.conf` est large ouvert
+
+Relevé en passant, **non demandé, non modifié** : `host all all 0.0.0.0/0 md5`
+et `listen_addresses = *`. N'importe quelle machine joignant le port 5432 peut
+tenter de s'authentifier sur n'importe quelle base. Signalé, pas touché — ce
+n'est pas mon périmètre et ça ne se change pas sans toi.
+
+---
+
+## 2026-09-10 14:45 — Étape 4 : les tests, et le banc de mutation
+
+**23 tests, 0 échec.** `npm test`, sans base, sur données fabriquées.
+
+**Ratio de mutation : 15/15 (100 %).** `npm run mutation` casse le code une faute
+à la fois et exige que la suite rougisse.
+
+Deux mutations ont survécu au premier passage. **Les deux étaient des trous
+réels**, et aucune n'était le défaut qu'elle semblait être :
+
+1. **`rupture` : protection des extrémités mise à zéro — SURVIVAIT.**
+   Le test que je venais d'écrire passait `{ minParCote: 3 }` explicitement : il
+   écrasait la valeur qu'il prétendait éprouver. **R5 — le test avait tort, pas
+   le code.** Corrigé en retirant l'argument.
+2. **Garde SQL : suppression du filtrage des commentaires de bloc — SURVIVAIT.**
+   La mutation rend la garde *plus* stricte, pas plus laxiste : elle rejette
+   aussi les vraies lectures commentées. Aucun test ne couvrait le cas légitime
+   `/* … */ SELECT 1`. Test ajouté — une garde qui refuse nos propres requêtes
+   est une garde qu'on finira par contourner.
+
+---
+
+## 2026-09-10 15:00 — Étape 3 : la première version tourne
+
+**FAIT ET VÉRIFIÉ** — `npm start`, mesuré :
+
+| chemin | code | taille |
+|---|---|---|
+| `/` | 200 | 5 660 o |
+| `/joueurs` | 200 | 10 168 o |
+| `/parties` | 200 | 24 626 o |
+| `/boutiques` | 200 | 3 926 o |
+| `/version` | 200 | 192 o |
+| `/rien` | 404 | — |
+| `POST /` | **405** | — |
+
+Le tampon affiché portait `dc9cad8+sale` pendant les essais, l'arbre étant sale :
+la garde fonctionne, elle s'est dénoncée d'elle-même.
+
+Écran ① sur données réelles : 1 423 joueurs, 24 clients connectés, `database: up`,
+base lue par `bo_lecture` en **3 ms**.
+
+Écran ④ : **« non lu »** pour les deux boutiques, avec la raison exacte. Conforme
+à l'attendu — les clés sont sur le Mac. Nabil colle la sortie d'`asc.py` pour les
+mots-clés Apple ; l'écran les affichera sans qu'une ligne change.
+
+---
+
+## 2026-09-10 15:10 — Ce que l'écran ③ a trouvé, et pourquoi j'ai failli me tromper
+
+Publié dans `CONSTATS_PARTIES.md`. Les trois points qui comptent :
+
+1. **79,7 % de fins anormales — ton chiffre est juste**, et il a un cinquième
+   terme que tu ne connaissais pas : **`away`, 392 parties, 13,1 %**. C'est lui
+   qui manquait à 41 + 28 + 21.
+
+2. ⛔ **J'ai d'abord lu une rupture au 21/08 (58,3 % → 81,4 %, 23 points) comme un
+   défaut mis en production. C'est faux.** `away` n'existe pas en base avant le
+   25/08, `complete` avant le 28/08, et `quit` reste à 1–3 par jour jusqu'au
+   23/08 — le dépôt du jeu dit pourquoi (`RAPPORT_NUIT.md:1186` : *« le protocole
+   dit `leave`, pas `quit` »*). Comme `settleMatch` écrit `reason || 'normal'`,
+   **les abandons dont la raison n'arrivait pas étaient comptés comme normaux**.
+   Le saut mesure le moment où on s'est mis à regarder. **Aucune comparaison avec
+   août n'a de valeur avant le 25/09.**
+
+3. **Ce qui reste vrai quoi qu'il arrive** — ces mesures ne dépendent d'aucun nom
+   de raison :
+   - **981 parties sur 2 993 (un tiers) durent moins de 10 secondes**, dont
+     99,8 % finissent mal. Contrôlé : **0 ligne** avec `ended_at = started_at`,
+     donc ce n'est pas un artefact d'écriture.
+   - **Le score du joueur vaut 0,00 à 0,17 en moyenne sur TOUTES les fins
+     anormales**, contre 47,29 en fin normale. **80 % des parties se terminent
+     sans que le joueur ait marqué un point.**
+   - Le premier « capitaine » du classement est **`read`, la valeur par défaut** :
+     le plus gros groupe est celui des joueurs qui n'ont rien choisi.
+
+   La question n'est donc pas « pourquoi abandonnent-ils » mais **« qu'est-ce qui
+   les empêche de commencer »**. Je ne le sais pas, et la base ne le dira pas :
+   c'est la collecte d'erreurs qui départagera.
+
+**OUVERT** — l'historique de `match` commence au 18/08 alors que le jeu existe
+depuis des mois. Table purgée, ou récente ? **Non élucidé.**
+
+---
+
+## 2026-09-10 15:15 — État de fin de session
+
+| | |
+|---|---|
+| Étape 1 reconnaissance | **VÉRIFIÉ** |
+| Étape 2 architecture | **VÉRIFIÉ** (proposée, validée, suivie) |
+| Étape 3 quatre écrans | **VÉRIFIÉ** — codes HTTP et contenu mesurés |
+| Étape 4 tests | **VÉRIFIÉ** — 23 tests, mutation 15/15 |
+| Étape 5 collecte d'erreurs | **OUVERT** — proposée dans `COLLECTE_ERREURS.md`, rien construit, dépôt du jeu **non modifié** |
+
+Aucune écriture dans la base de jeu. Aucune action sur les boutiques. Aucun
+déploiement. Aucune exposition réseau. **Aucune tâche de fond en cours** (R9) —
+le serveur d'essai a été arrêté, vérifié.
+
+Une seule écriture sur la production de toute la session : `CREATE ROLE
+bo_lecture` + ses `GRANT`, explicitement autorisée, et dont le seul pouvoir est
+`SELECT`.

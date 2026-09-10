@@ -1,0 +1,24 @@
+{
+  "name": "pirates-dice-bo",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node src/serveur.mjs",
+    "test": "node --test test/*.test.mjs",
+    "mutation": "node outils/mutation.mjs",
+    "preuve": "node outils/preuve_lecture_seule.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/UserNabil/piratesdice-bo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/UserNabil/piratesdice-bo/issues"
+  },
+  "homepage": "https://github.com/UserNabil/piratesdice-bo#readme",
+  "description": "Backoffice The Pirate's Dice — lecture seule, 127.0.0.1 uniquement.",
+  "dependencies": {
+    "pg": "^8.23.0"
+  },
+  "type": "module",
+  "private": true
+}

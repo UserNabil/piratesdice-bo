@@ -105,3 +105,23 @@ du schéma réel : je n'invente pas la table qui manque.
 Étape 2 (architecture) : en cours de rédaction, **rien de construit**.
 Aucune écriture en base. Aucun appel à une API de boutique. Aucun déploiement.
 Aucune tâche de fond en cours (R9).
+
+---
+
+## 2026-09-10 14:18 — Étape 2, architecture proposée
+
+`ARCHITECTURE.md` publié. **Rien de construit.** En attente de validation.
+
+Résumé des choix et de leur raison :
+
+- **Node 22 + `pg`, une seule dépendance, aucune étape de build.** Node est déjà
+  là, le serveur de jeu est en Node (un seul langage pour les deux moitiés),
+  `node --test` est livré avec. Pas de framework front : la valeur est dans le
+  SQL, pas dans une interface.
+- **Lecture seule : quatre gardes superposées** (G1 rôle `SELECT` seul, G2
+  `default_transaction_read_only`, G3 session en lecture seule, G4 point de
+  passage unique refusant tout ce qui ne commence pas par SELECT/WITH). Dit
+  explicitement dans le document : **seule G1 compte vraiment**, et elle vit hors
+  du backoffice. Un test devra tenter un INSERT et exiger son échec.
+- **`/version` + tampon affiché en bas de chaque écran**, SHA lu par
+  `git rev-parse` au démarrage, suffixe `+sale` si larbre
